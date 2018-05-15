@@ -2,29 +2,29 @@ import os
 import subprocess
 import glob
 import time
-# import mxnet.contrib.onnx._import as onnx_mxnet
-
+import numpy as np
 
 def get_model_input(model_dir):
     import onnx
     from onnx import numpy_helper
-    
-    model_inputs = {}
+
+    model_inputs = []
+    for test_data_npz in glob.glob(
+            os.path.join(model_dir, 'test_data_*.npz')):
+        test_data = np.load(test_data_npz, encoding='bytes')
+        model_inputs = list(test_data['inputs'])
+
     for test_data_dir in glob.glob(
             os.path.join(model_dir, "test_data_set*")):
-        inputs = []
         inputs_num = len(glob.glob(os.path.join(test_data_dir, 'input_*.pb')))
         for i in range(inputs_num):
             input_file = os.path.join(test_data_dir, 'input_{}.pb'.format(i))
             tensor = onnx.TensorProto()
             with open(input_file, 'rb') as f:
                 tensor.ParseFromString(f.read())
-            inputs.append(numpy_helper.to_array(tensor))
+            model_inputs.append(numpy_helper.to_array(tensor))
 
-        test_data_name = test_data_dir.split("/")[-1]
-        model_inputs.update({test_data_name: inputs})
     return model_inputs
-
 
 def profile_model(model_path, test_data, context):   
     import mxnet as mx
@@ -34,11 +34,11 @@ def profile_model(model_path, test_data, context):
     data_names = [graph_input for graph_input in sym.list_inputs()
                   if graph_input not in arg_params and graph_input not in aux_params]
 
-    log_data = {}
-    for test_data_name, inputs in test_data.iteritems():
+    inference_time = 0
+    for data_idx, _ in enumerate(test_data):
         data_shapes = []
         for idx, input_name in enumerate(data_names):
-                data_shapes.append((input_name, inputs[idx].shape))
+            data_shapes.append((input_name, test_data[idx+data_idx].shape))
 
         # create a module
         mod = mx.mod.Module(symbol=sym, data_names=data_names, context=ctx, label_names=None)
@@ -52,16 +52,18 @@ def profile_model(model_path, test_data, context):
 
         data_forward = []
         for idx, input_name in enumerate(data_names):
-            val = inputs[idx]
+            val = test_data[idx+data_idx]
             data_forward.append(mx.nd.array(val))
 
         start = time.time()
         mod.forward(mx.io.DataBatch(data_forward))
         total_time =  (time.time() - start)*1000
-        total_time = "{:.9f}".format(total_time)
-        log_data.update({test_data_name: total_time})
-    return log_data
-
+        #total_time = "{:.9f}".format(total_time)
+        # log_data.update({test_data_name: total_time})
+        inference_time += total_time
+    
+    avg_inference_time = inference_time/len(test_data)
+    return avg_inference_time
 
 if __name__ == '__main__':
 
@@ -75,7 +77,6 @@ if __name__ == '__main__':
 
                 profile_data = profile_model(model_path, test_data, ctx)
 
-                print(directory)
-                for k, v in profile_data.iteritems():
-                    print('{} {} ms'.format(k, v))
+                avg_inference_time = profile_model(model_path, test_data, ctx)
 
+                print('Average_inference_time_{}_{}: {:.9f}'.format(directory, ctx, avg_inference_time))
