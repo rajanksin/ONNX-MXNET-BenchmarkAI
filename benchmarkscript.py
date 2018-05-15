@@ -1,32 +1,14 @@
 import os
 import subprocess
 import glob
-import onnx
-from onnx import helper, numpy_helper
-import mxnet as mx
 import time
 # import mxnet.contrib.onnx._import as onnx_mxnet
 
-subprocess.call("./setup.sh")
 
 def get_model_input(model_dir):
-    # if model_test.model_dir is None:
-    #     model_dir = self._prepare_model_data(model_test)
-    # else:
-    #     model_dir = model_test.model_dir
-    # model_pb_path = os.path.join(model_dir, 'model.onnx')
-    # model = onnx.load(model_pb_path)
-    # model_marker[0] = model
-    # prepared_model = self.backend.prepare(model, device)
-
-    # # TODO after converting all npz files to protobuf, we can delete this.
-    # for test_data_npz in glob.glob(
-    #         os.path.join(model_dir, 'test_data_*.npz')):
-    #     test_data = np.load(test_data_npz, encoding='bytes')
-    #     inputs = list(test_data['inputs'])
-    #     outputs = list(prepared_model.run(inputs))
-    #     ref_outputs = test_data['outputs']
-    #     self._assert_similar_outputs(ref_outputs, outputs)
+    import onnx
+    from onnx import numpy_helper
+    
     model_inputs = {}
     for test_data_dir in glob.glob(
             os.path.join(model_dir, "test_data_set*")):
@@ -38,24 +20,17 @@ def get_model_input(model_dir):
             with open(input_file, 'rb') as f:
                 tensor.ParseFromString(f.read())
             inputs.append(numpy_helper.to_array(tensor))
-        # ref_outputs = []
-        # ref_outputs_num = len(glob.glob(os.path.join(test_data_dir, 'output_*.pb')))
-        # for i in range(ref_outputs_num):
-        #     output_file = os.path.join(test_data_dir, 'output_{}.pb'.format(i))
-        #     tensor = onnx.TensorProto()
-        #     with open(output_file, 'rb') as f:
-        #         tensor.ParseFromString(f.read())
-        #     ref_outputs.append(numpy_helper.to_array(tensor))
+
         test_data_name = test_data_dir.split("/")[-1]
         model_inputs.update({test_data_name: inputs})
-        # outputs = list(prepared_model.run(inputs))
-        # self._assert_similar_outputs(ref_outputs, outputs)
     return model_inputs
 
 
-def profile_model(model_path, test_data):
+def profile_model(model_path, test_data, context):   
+    import mxnet as mx
+
     sym, arg_params, aux_params = mx.contrib.onnx.import_model(model_path)
-    ctx = mx.cpu()
+    ctx = mx.gpu() if context == "gpu" else mx.cpu()
     data_names = [graph_input for graph_input in sym.list_inputs()
                   if graph_input not in arg_params and graph_input not in aux_params]
 
@@ -77,9 +52,6 @@ def profile_model(model_path, test_data):
 
         data_forward = []
         for idx, input_name in enumerate(data_names):
-            # slice and pad operator tests needs 1 less dimension in forward pass
-            # otherwise it will throw an error.
-            # for squeeze operator, need to retain shape of input as provided
             val = inputs[idx]
             data_forward.append(mx.nd.array(val))
 
@@ -92,15 +64,18 @@ def profile_model(model_path, test_data):
 
 
 if __name__ == '__main__':
-    for directory in os.listdir("./models"):
-        model_dir = os.path.join("./models", directory)
-        if os.path.isdir(model_dir):
-            model_path = os.path.join(model_dir, "model.onnx")
-            test_data = get_model_input(model_dir)
 
-            profile_data = profile_model(model_path, test_data)
+    for ctx in ["gpu","cpu"]:
+        subprocess.call(["./setup.sh",ctx])
+        for directory in os.listdir("./models"):
+            model_dir = os.path.join("./models", directory)
+            if os.path.isdir(model_dir):
+                model_path = os.path.join(model_dir, "model.onnx")
+                test_data = get_model_input(model_dir)
 
-            print(directory)
-            for k, v in profile_data.iteritems():
-                print('{} {} ms'.format(k, v))
+                profile_data = profile_model(model_path, test_data, ctx)
+
+                print(directory)
+                for k, v in profile_data.iteritems():
+                    print('{} {} ms'.format(k, v))
 

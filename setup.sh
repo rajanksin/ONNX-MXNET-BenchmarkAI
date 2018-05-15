@@ -3,14 +3,17 @@
 install_packages()
 {
     echo "Installing mxnet ......."
-    pip install mxnet --pre
+    sudo pip2 uninstall --yes mxnet
+    sudo pip2 uninstall --yes mxnet-cu90 
+    if [ "$1" == "cpu" ]; then
+    	sudo pip2 install mxnet --pre
+    else
+	sudo pip2 install mxnet-cu90 --pre
+    fi
     echo "Installing protobuf ......."
-    apt-get install protobuf-compiler libprotoc-dev
+    sudo apt-get install protobuf-compiler libprotoc-dev
     echo "Installing ONNX version 1.1.1 ........"
-    export MACOSX_DEPLOYMENT_TARGET=10.9 
-    export CC=clang 
-    export CXX=clang++
-    pip install onnx==1.1.1
+    sudo pip2 install protobuf==3.5.2 onnx==1.1.1
 }
 
 get_models()
@@ -29,8 +32,9 @@ get_models()
 }
 
 main() {
-    install_packages
+    echo "Running on  $1"
+    install_packages $1
     get_models
 }
 
-main
+main $1
